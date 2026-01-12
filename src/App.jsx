@@ -18,6 +18,13 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [showIngredients, setShowIngredients] = useState(false);
 
+  useEffect(() => {
+  if (!isLoading && ingredients && step !== "confirm" && step !== "result") {
+    setStep("confirm");
+  }
+}, [ingredients]);
+
+
   const scannerRef = useRef(null);
   const stableCount = useRef(0);
   const lastCode = useRef(null);
@@ -88,26 +95,41 @@ export default function App() {
     );
     const data = await res.json();
 
-    if (data.status === 1) {
-      const name = data.product.product_name || "Unknown Product";
+    if (data.status === 1 && data.product) {
+      const p = data.product;
+      const name = p.product_name || "Unknown Product";
       setProductName(name);
       setVariant("");
 
-      if (data.product.ingredients_text?.trim()) {
-        setIngredients(data.product.ingredients_text);
+      let ingredientsText =
+        p.ingredients_text ||
+        p.ingredients_text_en ||
+        p.ingredients_text_with_allergens ||
+        (Array.isArray(p.ingredients)
+          ? p.ingredients.map(i => i.text).join(", ")
+          : "");
+
+      if (ingredientsText && ingredientsText.trim()) {
+        setIngredients(ingredientsText);
         setStep("confirm");
       } else {
         await fetchIngredientsOnline(name, "");
       }
-    } else {
-      setStep("manual");
+
+      return;
     }
-  } catch (e) {
+
     setStep("manual");
+
+  } catch (e) {
+    console.error("Food API error:", e);
+    setStep("manual");
+
   } finally {
     setIsLoading(false);
   }
 };
+
 
   const fetchIngredientsOnline = async (name, variantInput) => {
   setIsLoading(true);
@@ -116,20 +138,27 @@ export default function App() {
   const fullName = variantInput ? `${name} ${variantInput}` : name;
   setProductName(fullName);
 
-  const text = await callGemini(
-    `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
-  );
+  try {
+    const text = await callGemini(
+      `Return comma-separated ingredients for "${fullName}".`
+    );
 
-  setIsLoading(false);
+    if (!text) throw new Error("No AI response");
 
-  if (!text || text.includes("NOT_FOUND")) {
+    // FORCE UI UPDATE ORDER
+    setIngredients(text);
+    setStep("confirm");
+
+  } catch (e) {
+    console.error("AI fetch failed:", e);
+
+    // GUARANTEED FALLBACK
     setIngredients("");
-    setStep("manual");          // IMPORTANT
-    return;
-  }
+    setStep("manual");
 
-  setIngredients(text);
-  setStep("confirm");          // IMPORTANT
+  } finally {
+    setIsLoading(false);
+  }
 };
 
   const analyzeSafety = async () => {
