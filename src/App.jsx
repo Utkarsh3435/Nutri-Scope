@@ -24,30 +24,30 @@ export default function App() {
 
   // Helper to talk to our new Backend
   const callGemini = async (prompt) => {
-  const res = await fetch("/api/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt })
-  });
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
 
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    throw new Error("Invalid server response");
-  }
+      const data = await res.json();
 
-  if (!res.ok) {
-    console.error("Backend error:", data);
-    throw new Error(data?.error || "AI request failed");
-  }
+      // IF SERVER THROWS ERROR (Like 429 or 500)
+      if (!res.ok) {
+        console.error("Backend Error:", data);
+        throw new Error(data.error || "Analysis failed");
+      }
 
-  if (!data?.result) {
-    throw new Error("Empty AI response");
-  }
+      // SUCCESS: The backend now returns { result: "..." }
+      return data.result;
 
-  return data.result;
-};
+    } catch (e) {
+      console.error("Gemini Call Failed:", e);
+      alert(`AI Error: ${e.message}`);
+      return null;
+    }
+  };
 
   useEffect(() => {
     if (step !== "scan") return;
@@ -78,94 +78,59 @@ export default function App() {
   }, [step]);
 
   const handleBarcodeFound = async (code) => {
-    setBarcode(code);
-    setIsLoading(true);
-    setLoadingMessage("Scanning Database...");
+  setBarcode(code);
+  setIsLoading(true);
+  setLoadingMessage("Scanning Database...");
 
-    try {
-      // 1. Use V2 API + Timestamp to prevent caching old bad results
-      const res = await fetch(
-        `https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,ingredients_text,ingredients&t=${Date.now()}`
-      );
-      const data = await res.json();
+  try {
+    const res = await fetch(
+      `https://world.openfoodfacts.org/api/v0/product/${code}.json`
+    );
+    const data = await res.json();
 
-      if (data.status === 1 || data.product) {
-        const product = data.product || data;
-        const name = product.product_name || "Unknown Product";
-        setProductName(name);
-        setVariant("");
+    if (data.status === 1) {
+      const name = data.product.product_name || "Unknown Product";
+      setProductName(name);
+      setVariant("");
 
-        // 2. SMART SEARCH: Find the longest ingredient list in ANY language
-        const allKeys = Object.keys(product);
-        const ingredientKeys = allKeys.filter(key => 
-          key.startsWith("ingredients_text") && product[key]
-        );
-
-        // Sort by length (longest is usually the best one)
-        ingredientKeys.sort((a, b) => product[b].length - product[a].length);
-
-        let finalIngredients = "";
-        
-        if (ingredientKeys.length > 0) {
-          finalIngredients = product[ingredientKeys[0]];
-        } else if (Array.isArray(product.ingredients)) {
-          finalIngredients = product.ingredients
-            .map(i => i.text || i.text_en || i.id)
-            .filter(Boolean)
-            .join(", ");
-        }
-
-        // 3. Validation: If ingredients are too short, force AI search
-        if (finalIngredients && finalIngredients.length > 5) {
-          setIngredients(finalIngredients);
-          setStep("confirm");
-        } else {
-          // Force Gemini if API gave us nothing
-          await fetchIngredientsOnline(name, "");
-        }
+      if (data.product.ingredients_text?.trim()) {
+        setIngredients(data.product.ingredients_text);
+        setStep("confirm");
       } else {
-        setStep("manual");
+        await fetchIngredientsOnline(name, "");
       }
-    } catch (e) {
-      console.error("Food API error:", e);
+    } else {
       setStep("manual");
-    } finally {
-      setIsLoading(false);
     }
-  };
+  } catch (e) {
+    setStep("manual");
+  } finally {
+    setIsLoading(false);
+  }
+};
 
-  // --- PASTE THIS IN THE EMPTY SPACE BEFORE analyzeSafety ---
   const fetchIngredientsOnline = async (name, variantInput) => {
-    setIsLoading(true);
-    setLoadingMessage("AI Searching...");
+  setIsLoading(true);
+  setLoadingMessage("AI Searching...");
 
-    const fullName = variantInput ? `${name} ${variantInput}` : name;
-    setProductName(fullName);
+  const fullName = variantInput ? `${name} ${variantInput}` : name;
+  setProductName(fullName);
 
-    try {
-      // Ask Gemini for ingredients
-      const text = await callGemini(
-        `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
-      );
+  const text = await callGemini(
+    `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
+  );
 
-      if (!text || text.includes("NOT_FOUND")) {
-        setIngredients("");
-        setStep("manual");
-        alert("AI could not find this product. Please enter ingredients manually.");
-        return;
-      }
+  setIsLoading(false);
 
-      setIngredients(text);
-      setStep("confirm");
+  if (!text || text.includes("NOT_FOUND")) {
+    setIngredients("");
+    setStep("manual");          // IMPORTANT
+    return;
+  }
 
-    } catch (e) {
-      console.error("AI fetch failed:", e);
-      setIngredients("");
-      setStep("manual");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  setIngredients(text);
+  setStep("confirm");          // IMPORTANT
+};
 
   const analyzeSafety = async () => {
     setIsLoading(true);
