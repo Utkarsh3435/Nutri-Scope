@@ -111,6 +111,14 @@ export default function App() {
         .join(", ");
       }
 
+      if (ingredientsText && ingredientsText.trim()) {
+        setIngredients(ingredientsText);
+        setStep("confirm");
+      } else {
+        setLoadingMessage("Ingredients not in database. Using AI...");
+        await fetchIngredientsOnline(name, "");
+      }
+
 
     if (ingredientsText && ingredientsText.trim()) {
       setIngredients(ingredientsText);
