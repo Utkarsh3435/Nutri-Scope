@@ -90,7 +90,7 @@ export default function App() {
     setLoadingMessage("Scanning Database...");
 
     try {
-      // 1. Use V2 API (It returns cleaner data than V0)
+      // 1. Use V2 API (Critical for getting complete data)
       const res = await fetch(
         `https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,ingredients_text,ingredients,ingredients_text_en,ingredients_text_in,ingredients_text_hi&t=${Date.now()}`
       );
@@ -98,44 +98,46 @@ export default function App() {
 
       if (data.status === 1 || data.product) {
         const p = data.product || data;
-        setProductName(p.product_name || "Unknown Product");
+        const name = p.product_name || "Unknown Product";
+        setProductName(name);
         setVariant("");
 
-        // --- THE FIX: BRUTE FORCE SEARCH ---
-        let foundIngredients = "";
+        // --- THE FIX START ---
+        let foundText = "";
 
-        // Strategy A: Check the text fields (Standard, English, India, Hindi)
-        if (p.ingredients_text) foundIngredients = p.ingredients_text;
-        else if (p.ingredients_text_en) foundIngredients = p.ingredients_text_en;
-        else if (p.ingredients_text_in) foundIngredients = p.ingredients_text_in;
-        else if (p.ingredients_text_hi) foundIngredients = p.ingredients_text_hi;
+        // Strategy 1: Check ALL text fields (English, India, Hindi)
+        if (p.ingredients_text) foundText = p.ingredients_text;
+        else if (p.ingredients_text_en) foundText = p.ingredients_text_en;
+        else if (p.ingredients_text_in) foundText = p.ingredients_text_in;
+        else if (p.ingredients_text_hi) foundText = p.ingredients_text_hi;
 
-        // Strategy B: If text is empty, build it from the "ingredients" array
-        // (This fixes the Amul issue where text is null but IDs exist)
-        if (!foundIngredients && Array.isArray(p.ingredients) && p.ingredients.length > 0) {
-           foundIngredients = p.ingredients
-             .map(i => i.text || i.id || "")  // Grab text or ID (e.g., "en:milk")
-             .filter(t => t && t.length > 2)  // Filter junk
-             .map(t => t.replace(/^[a-z]{2}:/g, "").replace(/-/g, " ")) // Clean "en:milk-fat" -> "milk fat"
+        // Strategy 2: If text is empty, build it from the TAGS (The "Yippee/Amul" Fix)
+        if (!foundText && Array.isArray(p.ingredients) && p.ingredients.length > 0) {
+           console.log("Text missing, rebuilding from tags..."); // Debug log
+           foundText = p.ingredients
+             .map(i => i.text || i.id || "") // Grab text OR ID
+             .filter(t => t && t.length > 2) // Remove empty/short junk
+             .map(t => t.replace(/^[a-z]{2}:/g, "").replace(/-/g, " ")) // Clean "en:wheat-flour" -> "wheat flour"
              .join(", ");
         }
+        // --- THE FIX END ---
 
-        // --- DECISION TIME ---
-        if (foundIngredients && foundIngredients.length > 5) {
-          // Success! We found them in the API
-          setIngredients(foundIngredients);
+        console.log("Final Ingredients:", foundText);
+
+        // 3. Decision Logic
+        if (foundText && foundText.length > 5) {
+          setIngredients(foundText);
           setStep("confirm");
         } else {
-          // API has name, but absolutely ZERO ingredients. Ask Gemini.
-          fetchIngredientsOnline(p.product_name || "", "");
+          // If the API truly has ZERO data, we must ask Gemini.
+          // IMPORTANT: Pass the name so Gemini knows what to look for.
+          await fetchIngredientsOnline(name, "");
         }
-
       } else {
-        // Product not found at all
         setStep("manual");
       }
     } catch (e) {
-      console.error(e);
+      console.error("Food API error:", e);
       setStep("manual");
     } finally {
       setIsLoading(false);
