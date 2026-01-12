@@ -24,30 +24,30 @@ export default function App() {
 
   // Helper to talk to our new Backend
   const callGemini = async (prompt) => {
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt })
-      });
+  const res = await fetch("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt })
+  });
 
-      const data = await res.json();
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error("Invalid server response");
+  }
 
-      // IF SERVER THROWS ERROR (Like 429 or 500)
-      if (!res.ok) {
-        console.error("Backend Error:", data);
-        throw new Error(data.error || "Analysis failed");
-      }
+  if (!res.ok) {
+    console.error("Backend error:", data);
+    throw new Error(data?.error || "AI request failed");
+  }
 
-      // SUCCESS: The backend now returns { result: "..." }
-      return data.result;
+  if (!data?.result) {
+    throw new Error("Empty AI response");
+  }
 
-    } catch (e) {
-      console.error("Gemini Call Failed:", e);
-      alert(`AI Error: ${e.message}`);
-      return null;
-    }
-  };
+  return data.result;
+};
 
   useEffect(() => {
     if (step !== "scan") return;
@@ -88,48 +88,40 @@ export default function App() {
     );
     const data = await res.json();
 
-    if (data.status === 1) {
-      const name = data.product.product_name || "Unknown Product";
+    if (data.status === 1 && data.product) {
+      const product = data.product;
+      const name = product.product_name || "Unknown Product";
       setProductName(name);
       setVariant("");
 
-      if (data.product.ingredients_text?.trim()) {
-        setIngredients(data.product.ingredients_text);
+      // ---------- FIX: Robust ingredient extraction ----------
+      const extractedIngredients =
+        product.ingredients_text ||
+        product.ingredients_text_en ||
+        product.ingredients_text_hi ||
+        product.ingredients_text_fr ||
+        product.ingredients_text_with_allergens ||
+        (Array.isArray(product.ingredients)
+          ? product.ingredients.map(i => i.text).join(", ")
+          : "");
+
+      if (extractedIngredients && extractedIngredients.trim()) {
+        setIngredients(extractedIngredients);
         setStep("confirm");
       } else {
         await fetchIngredientsOnline(name, "");
       }
+      // -------------------------------------------------------
+
     } else {
       setStep("manual");
     }
   } catch (e) {
+    console.error("Food API error:", e);
     setStep("manual");
   } finally {
     setIsLoading(false);
   }
-};
-
-  const fetchIngredientsOnline = async (name, variantInput) => {
-  setIsLoading(true);
-  setLoadingMessage("AI Searching...");
-
-  const fullName = variantInput ? `${name} ${variantInput}` : name;
-  setProductName(fullName);
-
-  const text = await callGemini(
-    `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
-  );
-
-  setIsLoading(false);
-
-  if (!text || text.includes("NOT_FOUND")) {
-    setIngredients("");
-    setStep("manual");          // IMPORTANT
-    return;
-  }
-
-  setIngredients(text);
-  setStep("confirm");          // IMPORTANT
 };
 
   const analyzeSafety = async () => {
