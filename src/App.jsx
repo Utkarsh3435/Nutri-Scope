@@ -18,13 +18,6 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [showIngredients, setShowIngredients] = useState(false);
 
-  useEffect(() => {
-  if (!isLoading && ingredients && step !== "confirm" && step !== "result") {
-    setStep("confirm");
-  }
-}, [ingredients]);
-
-
   const scannerRef = useRef(null);
   const stableCount = useRef(0);
   const lastCode = useRef(null);
@@ -85,64 +78,50 @@ export default function App() {
   }, [step]);
 
   const handleBarcodeFound = async (code) => {
-    setBarcode(code);
-    setIsLoading(true);
-    setLoadingMessage("Scanning Database...");
+  setBarcode(code);
+  setIsLoading(true);
+  setLoadingMessage("Scanning Database...");
 
-    try {
-      // 1. Use V2 API (Critical for getting complete data)
-      const res = await fetch(
-        `https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,ingredients_text,ingredients,ingredients_text_en,ingredients_text_in,ingredients_text_hi&t=${Date.now()}`
-      );
-      const data = await res.json();
+  try {
+    const res = await fetch(
+      `https://world.openfoodfacts.org/api/v0/product/${code}.json`
+    );
+    const data = await res.json();
 
-      if (data.status === 1 || data.product) {
-        const p = data.product || data;
-        const name = p.product_name || "Unknown Product";
-        setProductName(name);
-        setVariant("");
-
-        // --- THE FIX START ---
-        let foundText = "";
-
-        // Strategy 1: Check ALL text fields (English, India, Hindi)
-        if (p.ingredients_text) foundText = p.ingredients_text;
-        else if (p.ingredients_text_en) foundText = p.ingredients_text_en;
-        else if (p.ingredients_text_in) foundText = p.ingredients_text_in;
-        else if (p.ingredients_text_hi) foundText = p.ingredients_text_hi;
-
-        // Strategy 2: If text is empty, build it from the TAGS (The "Yippee/Amul" Fix)
-        if (!foundText && Array.isArray(p.ingredients) && p.ingredients.length > 0) {
-           console.log("Text missing, rebuilding from tags..."); // Debug log
-           foundText = p.ingredients
-             .map(i => i.text || i.id || "") // Grab text OR ID
-             .filter(t => t && t.length > 2) // Remove empty/short junk
-             .map(t => t.replace(/^[a-z]{2}:/g, "").replace(/-/g, " ")) // Clean "en:wheat-flour" -> "wheat flour"
-             .join(", ");
-        }
-        // --- THE FIX END ---
-
-        console.log("Final Ingredients:", foundText);
-
-        // 3. Decision Logic
-        if (foundText && foundText.length > 5) {
-          setIngredients(foundText);
-          setStep("confirm");
-        } else {
-          // If the API truly has ZERO data, we must ask Gemini.
-          // IMPORTANT: Pass the name so Gemini knows what to look for.
-          await fetchIngredientsOnline(name, "");
-        }
-      } else {
-        setStep("manual");
-      }
-    } catch (e) {
-      console.error("Food API error:", e);
+    if (!data || data.status !== 1 || !data.product) {
       setStep("manual");
-    } finally {
-      setIsLoading(false);
+      return;
     }
-  };
+
+    const p = data.product;
+
+    const name = p.product_name || "Unknown Product";
+    setProductName(name);
+    setVariant("");
+
+    const ingredientsText =
+      p.ingredients_text ||
+      p.ingredients_text_en ||
+      p.ingredients_text_with_allergens ||
+      (Array.isArray(p.ingredients)
+        ? p.ingredients.map(i => i.text).join(", ")
+        : "");
+
+    if (ingredientsText && ingredientsText.trim()) {
+      setIngredients(ingredientsText);
+      setStep("confirm");
+      return;
+    }
+
+    await fetchIngredientsOnline(name, "");
+  } catch (e) {
+    console.error("Food API error:", e);
+    setStep("manual");
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
 
   const fetchIngredientsOnline = async (name, variantInput) => {
