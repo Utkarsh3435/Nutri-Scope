@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // 1. Basic Setup
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   
   const apiKey = process.env.GEMINI_API_KEY;
@@ -7,14 +6,16 @@ export default async function handler(req, res) {
 
   const { prompt } = req.body;
 
-  // STRATEGY: Try the 'Lite' model first (Fastest), then '3.0' (Newest)
-  const models = ["gemini-2.5-flash-lite", "gemini-3-flash"];
+  // STRATEGY: Mumbai is working! We just need valid model names.
+  // 1. Lite (Fastest)
+  // 2. Standard (Backup)
+  const models = ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
   
   let lastError = "Unknown Error";
 
   for (const model of models) {
     try {
-      console.log(`[Backend] Trying ${model} from ${process.env.VERCEL_REGION || "Unknown Region"}...`);
+      console.log(`[Backend] Trying ${model} from Mumbai...`);
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -32,17 +33,10 @@ export default async function handler(req, res) {
         return res.status(200).json({ result: text });
       }
 
-      // FAILURE - Capture the specific message
+      // FAILURE
       const errorText = await response.text();
       console.error(`[Backend] ${model} Failed:`, errorText);
-
-      // Try to parse the JSON error to get the readable message
-      try {
-        const errObj = JSON.parse(errorText);
-        lastError = `${model}: ${errObj.error.message}`;
-      } catch {
-        lastError = `${model}: ${errorText}`;
-      }
+      lastError = errorText;
 
     } catch (e) {
       console.error(`[Backend] Network Error:`, e);
@@ -50,8 +44,8 @@ export default async function handler(req, res) {
     }
   }
 
-  // If both fail, send the SPECIFIC error to your phone
+  // If both fail, send the error to your phone
   return res.status(500).json({ 
-    error: lastError 
+    error: `Analysis Failed. Google says: ${lastError}` 
   });
 }
