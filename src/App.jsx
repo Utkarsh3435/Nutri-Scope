@@ -91,7 +91,7 @@ export default function App() {
 
   try {
     const res = await fetch(
-      `https://world.openfoodfacts.org/api/v0/product/${code}.json`
+      "/api/product?code=${code}"
     );
     const data = await res.json();
 
