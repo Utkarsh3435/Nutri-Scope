@@ -33,15 +33,19 @@ export default function App() {
 
       const data = await res.json();
 
+      // IF SERVER THROWS ERROR (Like 429 or 500)
       if (!res.ok) {
-        // Return the specific error from the backend (e.g., "Model not found")
-        return `ERROR: ${data.error || "Server Failed"}`;
+        console.error("Backend Error:", data);
+        throw new Error(data.error || "Analysis failed");
       }
 
+      // SUCCESS: The backend now returns { result: "..." }
       return data.result;
 
     } catch (e) {
-      return `ERROR: Network Connection Failed (${e.message})`;
+      console.error("Gemini Call Failed:", e);
+      alert(`AI Error: ${e.message}`);
+      return null;
     }
   };
 
@@ -106,35 +110,27 @@ export default function App() {
 };
 
   const fetchIngredientsOnline = async (name, variantInput) => {
-    setIsLoading(true);
-    setLoadingMessage("AI Searching...");
-    
-    const fullName = variantInput ? `${name} ${variantInput}` : name;
-    setProductName(fullName);
+  setIsLoading(true);
+  setLoadingMessage("AI Searching...");
 
-    const text = await callGemini(`Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`);
+  const fullName = variantInput ? `${name} ${variantInput}` : name;
+  setProductName(fullName);
 
-    setIsLoading(false);
+  const text = await callGemini(
+    `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
+  );
 
-    // Case 1: AI completely failed (Network/Server Error)
-    if (!text || text.startsWith("ERROR:")) {
-      setIngredients(text || "Error: No response.");
-      setStep("confirm"); // Go to the next screen so you can READ the error
-      return;
-    }
+  setIsLoading(false);
 
-    // Case 2: AI worked but couldn't find the product
-    if (text.includes("NOT_FOUND")) {
-      alert("Product not found in AI database. Please type ingredients manually.");
-      setIngredients(""); 
-      // We stay on "manual" step so you can type
-      return;
-    }
+  if (!text || text.includes("NOT_FOUND")) {
+    setIngredients("");
+    setStep("manual");          // IMPORTANT
+    return;
+  }
 
-    // Case 3: Success!
-    setIngredients(text);
-    setStep("confirm");
-  };
+  setIngredients(text);
+  setStep("confirm");          // IMPORTANT
+};
 
   const analyzeSafety = async () => {
     setIsLoading(true);
