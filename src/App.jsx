@@ -85,63 +85,62 @@ export default function App() {
   }, [step]);
 
   const handleBarcodeFound = async (code) => {
-    setBarcode(code);
-    setIsLoading(true);
-    setLoadingMessage("Scanning Database...");
+  setBarcode(code);
+  setIsLoading(true);
+  setLoadingMessage("Scanning Database...");
 
-    try {
-      // 1. Force V2 API (Better data) + Request specific fields + Timestamp to bypass cache
-      const res = await fetch(
-        `https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,ingredients_text,ingredients,ingredients_text_en,ingredients_text_in,ingredients_text_hi&t=${Date.now()}`
-      );
-      const data = await res.json();
+  try {
+    const res = await fetch(
+      `https://world.openfoodfacts.org/api/v0/product/${code}.json`
+    );
+    const data = await res.json();
 
-      if (data.status === 1 || data.product) {
-        const p = data.product || data;
-        const name = p.product_name || "Unknown Product";
-        setProductName(name);
-        setVariant("");
-
-        // --- THE FIX: BRUTE FORCE EXTRACTION ---
-        let foundText = "";
-
-        // Check 1: Direct Text Fields (Standard, English, India, Hindi)
-        if (p.ingredients_text) foundText = p.ingredients_text;
-        else if (p.ingredients_text_en) foundText = p.ingredients_text_en;
-        else if (p.ingredients_text_in) foundText = p.ingredients_text_in;
-        else if (p.ingredients_text_hi) foundText = p.ingredients_text_hi;
-
-        // Check 2: The Array Fallback (CRITICAL FOR AMUL/INDIAN PRODUCTS)
-        // Often the API has [{id: "en:milk"}, {id: "en:sugar"}] but NO text.
-        // Your old code failed here because it only looked for .text
-        if (!foundText && Array.isArray(p.ingredients) && p.ingredients.length > 0) {
-           foundText = p.ingredients
-             .map(i => i.text || i.id || "") // Use ID if text is missing
-             .filter(t => t.length > 2)      // Filter out junk
-             .map(t => t.replace(/en:|hi:|fr:/g, "").replace(/-/g, " ")) // Clean "en:milk" -> "milk"
-             .join(", ");
-        }
-        // ---------------------------------------
-
-        console.log("Raw API Ingredients:", foundText); // Check Console (F12) to verify
-
-        if (foundText && foundText.length > 5) {
-          setIngredients(foundText);
-          setStep("confirm");
-        } else {
-          // Only if absolutely NOTHING was found, ask Gemini
-          await fetchIngredientsOnline(name, "");
-        }
-      } else {
-        setStep("manual");
-      }
-    } catch (e) {
-      console.error("Food API error:", e);
+    if (data.status !== 1 || !data.product) {
       setStep("manual");
-    } finally {
-      setIsLoading(false);
+      return;
     }
-  };
+
+    const p = data.product;
+    const name = p.product_name || "Unknown Product";
+    setProductName(name);
+    setVariant("");
+
+    // ---- REAL FIX: universal ingredient extractor ----
+    let ingredientsText = "";
+
+    if (p.ingredients_text && p.ingredients_text.trim()) {
+      ingredientsText = p.ingredients_text;
+    } 
+    else if (p.ingredients_text_en && p.ingredients_text_en.trim()) {
+      ingredientsText = p.ingredients_text_en;
+    } 
+    else if (p.ingredients_text_with_allergens && p.ingredients_text_with_allergens.trim()) {
+      ingredientsText = p.ingredients_text_with_allergens;
+    } 
+    else if (Array.isArray(p.ingredients) && p.ingredients.length > 0) {
+      ingredientsText = p.ingredients
+        .map(i => i.text)
+        .filter(Boolean)
+        .join(", ");
+    }
+
+    // -----------------------------------------------
+
+    if (ingredientsText.trim()) {
+      setIngredients(ingredientsText);
+      setStep("confirm");
+    } else {
+      await fetchIngredientsOnline(name, "");
+    }
+
+  } catch (e) {
+    console.error("Food API error:", e);
+    setStep("manual");
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   const fetchIngredientsOnline = async (name, variantInput) => {
   setIsLoading(true);
