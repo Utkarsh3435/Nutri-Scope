@@ -123,7 +123,7 @@ export default function App() {
 
     if (!text || text.includes("NOT_FOUND")) {
       setIngredients("");
-      setStep("manual");
+      setStep("confirm");
       return;
     }
 
@@ -131,14 +131,13 @@ export default function App() {
     setStep("confirm");
 
   } catch (e) {
-    console.error("Gemini fetch failed:", e);
+    console.error("AI fetch failed:", e);
     setIngredients("");
     setStep("manual");
   } finally {
     setIsLoading(false);
   }
 };
-
 
   const analyzeSafety = async () => {
     setIsLoading(true);
