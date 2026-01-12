@@ -24,30 +24,30 @@ export default function App() {
 
   // Helper to talk to our new Backend
   const callGemini = async (prompt) => {
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt })
-      });
+  const res = await fetch("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt })
+  });
 
-      const data = await res.json();
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error("Invalid server response");
+  }
 
-      // IF SERVER THROWS ERROR (Like 429 or 500)
-      if (!res.ok) {
-        console.error("Backend Error:", data);
-        throw new Error(data.error || "Analysis failed");
-      }
+  if (!res.ok) {
+    console.error("Backend error:", data);
+    throw new Error(data?.error || "AI request failed");
+  }
 
-      // SUCCESS: The backend now returns { result: "..." }
-      return data.result;
+  if (!data?.result) {
+    throw new Error("Empty AI response");
+  }
 
-    } catch (e) {
-      console.error("Gemini Call Failed:", e);
-      alert(`AI Error: ${e.message}`);
-      return null;
-    }
-  };
+  return data.result;
+};
 
   useEffect(() => {
     if (step !== "scan") return;
@@ -110,35 +110,35 @@ export default function App() {
 };
 
   const fetchIngredientsOnline = async (name, variantInput) => {
-    setIsLoading(true);
-    setLoadingMessage("AI Searching...");
+  setIsLoading(true);
+  setLoadingMessage("AI Searching...");
 
-    try {
-      const fullName = variantInput ? `${name} ${variantInput}` : name;
-      setProductName(fullName);
+  const fullName = variantInput ? `${name} ${variantInput}` : name;
+  setProductName(fullName);
 
-      const text = await callGemini(
-        `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
-      );
+  try {
+    const text = await callGemini(
+      `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
+    );
 
-      // If text is null (error) or NOT_FOUND, go to manual
-      if (!text || text.includes("NOT_FOUND")) {
-        setIngredients("");
-        setStep("manual");
-        return;
-      }
-
-      setIngredients(text);
-      setStep("confirm");
-
-    } catch (error) {
-      console.error("Search Error:", error);
+    if (!text || text.includes("NOT_FOUND")) {
+      setIngredients("");
       setStep("manual");
-    } finally {
-      // THIS is the fix. It runs 100% of the time, forcing the spinner off.
-      setIsLoading(false);
+      return;
     }
-  };
+
+    setIngredients(text);
+    setStep("confirm");
+
+  } catch (e) {
+    console.error("Gemini fetch failed:", e);
+    setIngredients("");
+    setStep("manual");
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   const analyzeSafety = async () => {
     setIsLoading(true);
