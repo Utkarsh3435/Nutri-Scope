@@ -110,27 +110,35 @@ export default function App() {
 };
 
   const fetchIngredientsOnline = async (name, variantInput) => {
-  setIsLoading(true);
-  setLoadingMessage("AI Searching...");
+    setIsLoading(true);
+    setLoadingMessage("AI Searching...");
 
-  const fullName = variantInput ? `${name} ${variantInput}` : name;
-  setProductName(fullName);
+    try {
+      const fullName = variantInput ? `${name} ${variantInput}` : name;
+      setProductName(fullName);
 
-  const text = await callGemini(
-    `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
-  );
+      const text = await callGemini(
+        `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
+      );
 
-  setIsLoading(false);
+      // If text is null (error) or NOT_FOUND, go to manual
+      if (!text || text.includes("NOT_FOUND")) {
+        setIngredients("");
+        setStep("manual");
+        return;
+      }
 
-  if (!text || text.includes("NOT_FOUND")) {
-    setIngredients("");
-    setStep("manual");          // IMPORTANT
-    return;
-  }
+      setIngredients(text);
+      setStep("confirm");
 
-  setIngredients(text);
-  setStep("confirm");          // IMPORTANT
-};
+    } catch (error) {
+      console.error("Search Error:", error);
+      setStep("manual");
+    } finally {
+      // THIS is the fix. It runs 100% of the time, forcing the spinner off.
+      setIsLoading(false);
+    }
+  };
 
   const analyzeSafety = async () => {
     setIsLoading(true);
