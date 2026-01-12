@@ -1,19 +1,28 @@
+// DELETE ANY "export const config" LINES IF YOU SEE THEM!
+// This is a standard Node.js function.
+
 export default async function handler(req, res) {
-  // 1. Force a "Success" status (200) even if setup fails, so the App reads the message.
-  if (req.method !== "POST") return res.status(200).json({ result: "ERROR: Method not allowed" });
-  
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return res.status(200).json({ result: "ERROR: API Key is missing in Vercel Settings" });
-
-  const { prompt } = req.body;
-
-  // STRATEGY: Use the ONE model that showed "4/10" usage in your screenshot.
-  // This is the only one we trust right now.
-  const model = "gemini-2.5-flash-lite";
-
+  // 1. SAFETY NET: Wrap everything in a Try/Catch so it NEVER crashes (500)
   try {
+    // Basic Checks
+    if (req.method !== "POST") {
+      return res.status(200).json({ result: "SYSTEM ERROR: Method not allowed" });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(200).json({ result: "SYSTEM ERROR: API Key is missing in Vercel Settings" });
+    }
+
+    const { prompt } = req.body;
+    
+    // 2. USE THE MODEL FROM YOUR SCREENSHOT
+    // gemini-2.5-flash-lite showed usage, so we trust it.
+    const model = "gemini-2.5-flash-lite";
+
     console.log(`[Backend] Connecting to ${model}...`);
 
+    // 3. CALL GOOGLE
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
@@ -23,36 +32,28 @@ export default async function handler(req, res) {
       }
     );
 
-    // 2. Handling the Response
+    // 4. HANDLE RESPONSE (Even if it fails, we send it as text)
     if (response.ok) {
       const data = await response.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       
-      if (text) {
-        return res.status(200).json({ result: text });
-      } else {
-        return res.status(200).json({ result: "ERROR: AI returned empty text" });
-      }
+      if (text) return res.status(200).json({ result: text });
+      return res.status(200).json({ result: "SYSTEM ERROR: AI returned empty text." });
     }
 
-    // 3. FAILURE CASE: Google gave an error (404, 429, etc.)
+    // Capture Google's specific error message
     const errorText = await response.text();
-    console.error(`[Backend] Google Error:`, errorText);
-    
-    // Parse the error to be readable
-    let niceError = errorText;
+    let cleanError = errorText;
     try {
-      const json = JSON.parse(errorText);
-      niceError = json.error.message;
+      cleanError = JSON.parse(errorText).error.message;
     } catch (e) {}
 
-    // CRITICAL FIX: Send 200 OK. This tricks the App into thinking it found ingredients.
-    // It will move to the next screen and display this error message in the text box.
-    return res.status(200).json({ result: `SYSTEM ERROR: ${niceError}` });
+    // 5. STOP THE BOUNCE: Send 200 OK with the error message
+    return res.status(200).json({ result: `SYSTEM ERROR: ${cleanError}` });
 
   } catch (error) {
-    console.error("[Backend] Crash:", error);
-    // CRITICAL FIX: Even on a server crash, send 200 OK with the error.
-    return res.status(200).json({ result: `CRASH ERROR: ${error.message}` });
+    // 6. CATCH CRITICAL CRASHES (Like "fetch is not defined")
+    console.error("Critical Crash:", error);
+    return res.status(200).json({ result: `CRITICAL CRASH: ${error.message}` });
   }
 }
