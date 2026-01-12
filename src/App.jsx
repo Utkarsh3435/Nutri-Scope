@@ -88,21 +88,30 @@ export default function App() {
     );
     const data = await res.json();
 
-    if (data.status === 1 && data.product) {
-      const product = data.product;
-      const name = product.product_name || "Unknown Product";
-      setProductName(name);
-      setVariant("");
+    console.log("FULL API RESPONSE:", data);
 
-      // ---------- FIX: Robust ingredient extraction ----------
-      const extractedIngredients =
-      product.ingredients_text ||
-      product.ingredients_text_en ||
-      product.ingredients_text_with_allergens ||
-      product.ingredients_text_hi ||
-      product.ingredients_text_fr ||
-      (Array.isArray(product.ingredients)
-      ? product.ingredients
+    if (!data || data.status !== 1 || !data.product) {
+      console.log("Product not found in API");
+      setStep("manual");
+      return;
+    }
+
+    const product = data.product;
+    console.log("PRODUCT OBJECT:", product);
+
+    setProductName(product.product_name || "Unknown Product");
+    setVariant("");
+
+    let extractedIngredients = "";
+
+    // 1. Direct text fields
+    if (product.ingredients_text) extractedIngredients = product.ingredients_text;
+    else if (product.ingredients_text_en) extractedIngredients = product.ingredients_text_en;
+    else if (product.ingredients_text_with_allergens) extractedIngredients = product.ingredients_text_with_allergens;
+
+    // 2. Structured ingredients array
+    else if (Array.isArray(product.ingredients)) {
+      extractedIngredients = product.ingredients
         .map(i =>
           i.text ||
           i.text_en ||
@@ -110,22 +119,21 @@ export default function App() {
           i.label
         )
         .filter(Boolean)
-        .join(", ")
-    : "");
-
-      if (extractedIngredients && extractedIngredients.trim()) {
-        setIngredients(extractedIngredients);
-        setStep("confirm");
-      } else {
-        await fetchIngredientsOnline(name, "");
-      }
-      // -------------------------------------------------------
-
-    } else {
-      setStep("manual");
+        .join(", ");
     }
+
+    console.log("EXTRACTED INGREDIENTS:", extractedIngredients);
+
+    if (extractedIngredients && extractedIngredients.trim()) {
+      setIngredients(extractedIngredients);
+      setStep("confirm");
+    } else {
+      console.log("No ingredients in API → switching to AI fetch");
+      await fetchIngredientsOnline(product.product_name || "", "");
+    }
+
   } catch (e) {
-    console.error("Food API error:", e);
+    console.error("Food API ERROR:", e);
     setStep("manual");
   } finally {
     setIsLoading(false);
