@@ -96,14 +96,22 @@ export default function App() {
 
       // ---------- FIX: Robust ingredient extraction ----------
       const extractedIngredients =
-        product.ingredients_text ||
-        product.ingredients_text_en ||
-        product.ingredients_text_hi ||
-        product.ingredients_text_fr ||
-        product.ingredients_text_with_allergens ||
-        (Array.isArray(product.ingredients)
-          ? product.ingredients.map(i => i.text).join(", ")
-          : "");
+      product.ingredients_text ||
+      product.ingredients_text_en ||
+      product.ingredients_text_with_allergens ||
+      product.ingredients_text_hi ||
+      product.ingredients_text_fr ||
+      (Array.isArray(product.ingredients)
+      ? product.ingredients
+        .map(i =>
+          i.text ||
+          i.text_en ||
+          i.id ||
+          i.label
+        )
+        .filter(Boolean)
+        .join(", ")
+    : "");
 
       if (extractedIngredients && extractedIngredients.trim()) {
         setIngredients(extractedIngredients);
