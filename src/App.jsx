@@ -85,67 +85,68 @@ export default function App() {
   }, [step]);
 
   const handleBarcodeFound = async (code) => {
-  setBarcode(code);
-  setIsLoading(true);
-  setLoadingMessage("Scanning Database...");
+    setBarcode(code);
+    setIsLoading(true);
+    setLoadingMessage("Scanning Database...");
 
-  try {
-    const res = await fetch(
-      `https://world.openfoodfacts.org/api/v0/product/${code}.json`
-    );
-    const data = await res.json();
+    try {
+      // FIX 1: Use V2 API (Much more reliable than V0)
+      const res = await fetch(
+        `https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,ingredients_text,ingredients,ingredients_text_en,ingredients_text_hi,ingredients_text_in&t=${Date.now()}`
+      );
+      const data = await res.json();
 
-    if (data.status !== 1 || !data.product) {
+      if (data.status === 1 || data.product) {
+        const p = data.product || data;
+        const name = p.product_name || "Unknown Product";
+        setProductName(name);
+        setVariant("");
+
+        // FIX 2: DYNAMICALLY SEARCH ALL KEYS
+        // This finds 'ingredients_text_hi', 'ingredients_text_fr', etc. automatically
+        const allKeys = Object.keys(p);
+        const ingredientKeys = allKeys.filter(key => 
+          key.startsWith("ingredients_text") && p[key] && p[key].length > 5
+        );
+
+        // Sort by length (Longest text is usually the correct ingredient list)
+        ingredientKeys.sort((a, b) => p[b].length - p[a].length);
+
+        let finalIngredients = "";
+
+        if (ingredientKeys.length > 0) {
+          // 1. Best case: We found a long text field
+          finalIngredients = p[ingredientKeys[0]];
+        } else if (Array.isArray(p.ingredients) && p.ingredients.length > 0) {
+          // 2. Fallback: Reconstruct from the array (checking ID if text is missing)
+          finalIngredients = p.ingredients
+            .map(i => i.text || i.id || "") // Sometimes 'text' is empty but 'id' exists
+            .filter(t => t.length > 1) // Remove empty junk
+            .join(", ")
+            .replace(/en:|hi:/g, ""); // Clean up prefixes like "en:sugar"
+        }
+
+        console.log("Extracted Ingredients:", finalIngredients);
+
+        // FIX 3: Valid Check
+        // Only accept if we found more than 10 characters of text
+        if (finalIngredients && finalIngredients.length > 10) {
+          setIngredients(finalIngredients);
+          setStep("confirm");
+        } else {
+          // Only asks AI if the API truly has ZERO data
+          await fetchIngredientsOnline(name, "");
+        }
+      } else {
+        setStep("manual");
+      }
+    } catch (e) {
+      console.error("Food API error:", e);
       setStep("manual");
-      return;
+    } finally {
+      setIsLoading(false);
     }
-
-    const p = data.product;
-    const name = p.product_name || "Unknown Product";
-    setProductName(name);
-    setVariant("");
-
-    let ingredientsText = "";
-
-    // 1. Most common
-    if (p.ingredients_text && p.ingredients_text.trim()) {
-      ingredientsText = p.ingredients_text;
-    }
-    // 2. English fallback
-    else if (p.ingredients_text_en && p.ingredients_text_en.trim()) {
-      ingredientsText = p.ingredients_text_en;
-    }
-    // 3. With allergens
-    else if (
-      p.ingredients_text_with_allergens &&
-      p.ingredients_text_with_allergens.trim()
-    ) {
-      ingredientsText = p.ingredients_text_with_allergens;
-    }
-    // 4. Structured ingredients array (MOST IMPORTANT FIX)
-    else if (Array.isArray(p.ingredients) && p.ingredients.length > 0) {
-      ingredientsText = p.ingredients
-        .map(i => i.text)
-        .filter(Boolean)
-        .join(", ");
-    }
-
-    if (ingredientsText) {
-      setIngredients(ingredientsText);
-      setStep("confirm");
-      return;
-    }
-
-    // Only now fallback to AI
-    await fetchIngredientsOnline(name, "");
-
-  } catch (e) {
-    console.error("Food API error:", e);
-    setStep("manual");
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
   const fetchIngredientsOnline = async (name, variantInput) => {
   setIsLoading(true);
