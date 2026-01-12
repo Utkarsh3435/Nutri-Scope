@@ -24,30 +24,30 @@ export default function App() {
 
   // Helper to talk to our new Backend
   const callGemini = async (prompt) => {
-  const res = await fetch("/api/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt })
-  });
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
 
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    throw new Error("Invalid server response");
-  }
+      const data = await res.json();
 
-  if (!res.ok) {
-    console.error("Backend error:", data);
-    throw new Error(data?.error || "AI request failed");
-  }
+      // IF SERVER THROWS ERROR (Like 429 or 500)
+      if (!res.ok) {
+        console.error("Backend Error:", data);
+        throw new Error(data.error || "Analysis failed");
+      }
 
-  if (!data?.result) {
-    throw new Error("Empty AI response");
-  }
+      // SUCCESS: The backend now returns { result: "..." }
+      return data.result;
 
-  return data.result;
-};
+    } catch (e) {
+      console.error("Gemini Call Failed:", e);
+      alert(`AI Error: ${e.message}`);
+      return null;
+    }
+  };
 
   useEffect(() => {
     if (step !== "scan") return;
@@ -88,65 +88,48 @@ export default function App() {
     );
     const data = await res.json();
 
-    if (data.status === 1 && data.product) {
-      const p = data.product;
-      const name = p.product_name || "Unknown Product";
+    if (data.status === 1) {
+      const name = data.product.product_name || "Unknown Product";
       setProductName(name);
       setVariant("");
 
-      let ingredientsText = "";
-
-      // HARD FALLBACK CHAIN
-      if (p.ingredients_text) ingredientsText = p.ingredients_text;
-      else if (p.ingredients_text_en) ingredientsText = p.ingredients_text_en;
-      else if (p.ingredients_text_with_allergens) ingredientsText = p.ingredients_text_with_allergens;
-      else if (Array.isArray(p.ingredients) && p.ingredients.length > 0) {
-        ingredientsText = p.ingredients.map(i => i.text).join(", ");
+      if (data.product.ingredients_text?.trim()) {
+        setIngredients(data.product.ingredients_text);
+        setStep("confirm");
+      } else {
+        await fetchIngredientsOnline(name, "");
       }
-
-      // FINAL GUARANTEE
-      if (!ingredientsText || !ingredientsText.trim()) {
-        ingredientsText = "__FORCE_AI__";
-      }
-
-      setIngredients(ingredientsText);
-      setStep("confirm");
-      return;
+    } else {
+      setStep("manual");
     }
-
-    setStep("manual");
   } catch (e) {
-    console.error("Food API failed:", e);
     setStep("manual");
   } finally {
     setIsLoading(false);
   }
 };
 
-const fetchIngredientsOnline = async (name, variantInput) => {
+  const fetchIngredientsOnline = async (name, variantInput) => {
   setIsLoading(true);
   setLoadingMessage("AI Searching...");
 
   const fullName = variantInput ? `${name} ${variantInput}` : name;
   setProductName(fullName);
 
-  try {
-    const text = await callGemini(
-      `Return comma-separated ingredients for "${fullName}".`
-    );
+  const text = await callGemini(
+    `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
+  );
 
-    if (!text) throw new Error("No AI response");
+  setIsLoading(false);
 
-    setIngredients(text);
-    setStep("confirm");
-
-  } catch (e) {
-    console.error("AI fetch failed:", e);
+  if (!text || text.includes("NOT_FOUND")) {
     setIngredients("");
-    setStep("manual");
-  } finally {
-    setIsLoading(false);
+    setStep("manual");          // IMPORTANT
+    return;
   }
+
+  setIngredients(text);
+  setStep("confirm");          // IMPORTANT
 };
 
   const analyzeSafety = async () => {
