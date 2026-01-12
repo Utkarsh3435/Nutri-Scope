@@ -33,19 +33,15 @@ export default function App() {
 
       const data = await res.json();
 
-      // IF SERVER THROWS ERROR (Like 429 or 500)
       if (!res.ok) {
-        console.error("Backend Error:", data);
-        throw new Error(data.error || "Analysis failed");
+        // Return the specific error from the backend (e.g., "Model not found")
+        return `ERROR: ${data.error || "Server Failed"}`;
       }
 
-      // SUCCESS: The backend now returns { result: "..." }
       return data.result;
 
     } catch (e) {
-      console.error("Gemini Call Failed:", e);
-      alert(`AI Error: ${e.message}`);
-      return null;
+      return `ERROR: Network Connection Failed (${e.message})`;
     }
   };
 
@@ -110,27 +106,35 @@ export default function App() {
 };
 
   const fetchIngredientsOnline = async (name, variantInput) => {
-  setIsLoading(true);
-  setLoadingMessage("AI Searching...");
+    setIsLoading(true);
+    setLoadingMessage("AI Searching...");
+    
+    const fullName = variantInput ? `${name} ${variantInput}` : name;
+    setProductName(fullName);
 
-  const fullName = variantInput ? `${name} ${variantInput}` : name;
-  setProductName(fullName);
+    const text = await callGemini(`Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`);
 
-  const text = await callGemini(
-    `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
-  );
+    setIsLoading(false);
 
-  setIsLoading(false);
+    // Case 1: AI completely failed (Network/Server Error)
+    if (!text || text.startsWith("ERROR:")) {
+      setIngredients(text || "Error: No response.");
+      setStep("confirm"); // Go to the next screen so you can READ the error
+      return;
+    }
 
-  if (!text || text.includes("NOT_FOUND")) {
-    setIngredients("");
-    setStep("manual");          // IMPORTANT
-    return;
-  }
+    // Case 2: AI worked but couldn't find the product
+    if (text.includes("NOT_FOUND")) {
+      alert("Product not found in AI database. Please type ingredients manually.");
+      setIngredients(""); 
+      // We stay on "manual" step so you can type
+      return;
+    }
 
-  setIngredients(text);
-  setStep("confirm");          // IMPORTANT
-};
+    // Case 3: Success!
+    setIngredients(text);
+    setStep("confirm");
+  };
 
   const analyzeSafety = async () => {
     setIsLoading(true);
