@@ -90,9 +90,9 @@ export default function App() {
     setLoadingMessage("Scanning Database...");
 
     try {
-      // FIX 1: Use V2 API (Much more reliable than V0)
+      // 1. Force V2 API (Better data) + Request specific fields + Timestamp to bypass cache
       const res = await fetch(
-        `https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,ingredients_text,ingredients,ingredients_text_en,ingredients_text_hi,ingredients_text_in&t=${Date.now()}`
+        `https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,ingredients_text,ingredients,ingredients_text_en,ingredients_text_in,ingredients_text_hi&t=${Date.now()}`
       );
       const data = await res.json();
 
@@ -102,39 +102,34 @@ export default function App() {
         setProductName(name);
         setVariant("");
 
-        // FIX 2: DYNAMICALLY SEARCH ALL KEYS
-        // This finds 'ingredients_text_hi', 'ingredients_text_fr', etc. automatically
-        const allKeys = Object.keys(p);
-        const ingredientKeys = allKeys.filter(key => 
-          key.startsWith("ingredients_text") && p[key] && p[key].length > 5
-        );
+        // --- THE FIX: BRUTE FORCE EXTRACTION ---
+        let foundText = "";
 
-        // Sort by length (Longest text is usually the correct ingredient list)
-        ingredientKeys.sort((a, b) => p[b].length - p[a].length);
+        // Check 1: Direct Text Fields (Standard, English, India, Hindi)
+        if (p.ingredients_text) foundText = p.ingredients_text;
+        else if (p.ingredients_text_en) foundText = p.ingredients_text_en;
+        else if (p.ingredients_text_in) foundText = p.ingredients_text_in;
+        else if (p.ingredients_text_hi) foundText = p.ingredients_text_hi;
 
-        let finalIngredients = "";
-
-        if (ingredientKeys.length > 0) {
-          // 1. Best case: We found a long text field
-          finalIngredients = p[ingredientKeys[0]];
-        } else if (Array.isArray(p.ingredients) && p.ingredients.length > 0) {
-          // 2. Fallback: Reconstruct from the array (checking ID if text is missing)
-          finalIngredients = p.ingredients
-            .map(i => i.text || i.id || "") // Sometimes 'text' is empty but 'id' exists
-            .filter(t => t.length > 1) // Remove empty junk
-            .join(", ")
-            .replace(/en:|hi:/g, ""); // Clean up prefixes like "en:sugar"
+        // Check 2: The Array Fallback (CRITICAL FOR AMUL/INDIAN PRODUCTS)
+        // Often the API has [{id: "en:milk"}, {id: "en:sugar"}] but NO text.
+        // Your old code failed here because it only looked for .text
+        if (!foundText && Array.isArray(p.ingredients) && p.ingredients.length > 0) {
+           foundText = p.ingredients
+             .map(i => i.text || i.id || "") // Use ID if text is missing
+             .filter(t => t.length > 2)      // Filter out junk
+             .map(t => t.replace(/en:|hi:|fr:/g, "").replace(/-/g, " ")) // Clean "en:milk" -> "milk"
+             .join(", ");
         }
+        // ---------------------------------------
 
-        console.log("Extracted Ingredients:", finalIngredients);
+        console.log("Raw API Ingredients:", foundText); // Check Console (F12) to verify
 
-        // FIX 3: Valid Check
-        // Only accept if we found more than 10 characters of text
-        if (finalIngredients && finalIngredients.length > 10) {
-          setIngredients(finalIngredients);
+        if (foundText && foundText.length > 5) {
+          setIngredients(foundText);
           setStep("confirm");
         } else {
-          // Only asks AI if the API truly has ZERO data
+          // Only if absolutely NOTHING was found, ask Gemini
           await fetchIngredientsOnline(name, "");
         }
       } else {
