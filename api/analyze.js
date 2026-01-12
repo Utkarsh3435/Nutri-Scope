@@ -6,16 +6,17 @@ export default async function handler(req, res) {
 
   if (!apiKey) return res.status(500).json({ error: "Server Error: API Key missing" });
 
-  // STRATEGY: Sibling Swap
-  // We use ONLY the models listed in your screenshot.
+  // STRATEGY: Triple Fallback
+  // We add 'gemini-3-flash' as the final safety net.
   const models = [
-    "gemini-2.5-flash-lite", // Primary (10 RPM limit)
-    "gemini-2.5-flash"       // Backup (5 RPM limit - Separate bucket)
+    "gemini-2.5-flash-lite", // 1. Fast & Cheap
+    "gemini-2.5-flash",      // 2. Standard Backup
+    "gemini-3-flash"         // 3. The "Secret Weapon" (Separate Traffic Lane)
   ];
 
   for (const model of models) {
     try {
-      console.log(`[Backend] Trying model: ${model}...`);
+      console.log(`[Backend] Attempting: ${model}...`);
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -26,20 +27,18 @@ export default async function handler(req, res) {
         }
       );
 
-      // --- HANDLE RATE LIMIT (429) ---
+      // RATE LIMIT (429) -> Immediate Switch
       if (response.status === 429) {
-        console.warn(`[Backend] ${model} hit Rate Limit (429). Switching to backup...`);
-        // Don't wait (to avoid Vercel timeout), just try the next model immediately
+        console.warn(`[Backend] ${model} blocked (429). Switching...`);
         continue; 
       }
 
+      // OTHER ERRORS (Like 503 Overloaded) -> Immediate Switch
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[Backend] ${model} Error (${response.status}):`, errorText);
-        // If it's a 404 (Model not found), just try the next one
-        if (response.status === 404) continue;
-        // For other errors, keep going in case the next model works
-        continue;
+        console.error(`[Backend] ${model} failed (${response.status}):`, errorText);
+        // If 404 (Not Found), switch. If 500+ (Server Error), switch.
+        continue; 
       }
 
       // SUCCESS
@@ -51,12 +50,12 @@ export default async function handler(req, res) {
       }
 
     } catch (error) {
-      console.error(`[Backend] Connection failed for ${model}:`, error);
+      console.error(`[Backend] Connection error for ${model}:`, error);
     }
   }
 
-  // If ALL models fail
+  // If ALL 3 fail, we finally give up
   return res.status(429).json({ 
-    error: "Server is highly congested. Please wait 30 seconds." 
+    error: "System busy. Please wait 10s and try again." 
   });
 }
