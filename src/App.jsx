@@ -95,72 +95,83 @@ export default function App() {
     );
     const data = await res.json();
 
-    if (data.status === 1 && data.product) {
-      const p = data.product;
-      const name = p.product_name || "Unknown Product";
-      setProductName(name);
-      setVariant("");
-
-      let ingredientsText =
-        p.ingredients_text ||
-        p.ingredients_text_en ||
-        p.ingredients_text_with_allergens ||
-        (Array.isArray(p.ingredients)
-          ? p.ingredients.map(i => i.text).join(", ")
-          : "");
-
-      if (ingredientsText && ingredientsText.trim()) {
-        setIngredients(ingredientsText);
-        setStep("confirm");
-      } else {
-        await fetchIngredientsOnline(name, "");
-      }
-
+    if (data.status !== 1 || !data.product) {
+      setStep("manual");
       return;
     }
 
-    setStep("manual");
+    const p = data.product;
+    const name = p.product_name || "Unknown Product";
+    setProductName(name);
+    setVariant("");
+
+    let ingredientsText = "";
+
+    // 1. Most common
+    if (p.ingredients_text && p.ingredients_text.trim()) {
+      ingredientsText = p.ingredients_text;
+    }
+    // 2. English fallback
+    else if (p.ingredients_text_en && p.ingredients_text_en.trim()) {
+      ingredientsText = p.ingredients_text_en;
+    }
+    // 3. With allergens
+    else if (
+      p.ingredients_text_with_allergens &&
+      p.ingredients_text_with_allergens.trim()
+    ) {
+      ingredientsText = p.ingredients_text_with_allergens;
+    }
+    // 4. Structured ingredients array (MOST IMPORTANT FIX)
+    else if (Array.isArray(p.ingredients) && p.ingredients.length > 0) {
+      ingredientsText = p.ingredients
+        .map(i => i.text)
+        .filter(Boolean)
+        .join(", ");
+    }
+
+    if (ingredientsText) {
+      setIngredients(ingredientsText);
+      setStep("confirm");
+      return;
+    }
+
+    // Only now fallback to AI
+    await fetchIngredientsOnline(name, "");
 
   } catch (e) {
     console.error("Food API error:", e);
     setStep("manual");
-
   } finally {
     setIsLoading(false);
   }
 };
 
-
   const fetchIngredientsOnline = async (name, variantInput) => {
   setIsLoading(true);
   setLoadingMessage("AI Searching...");
-
   const fullName = variantInput ? `${name} ${variantInput}` : name;
   setProductName(fullName);
-
   try {
     const text = await callGemini(
       `Return comma-separated ingredients for "${fullName}".`
     );
-
     if (!text) throw new Error("No AI response");
-
     // FORCE UI UPDATE ORDER
     setIngredients(text);
     setStep("confirm");
 
   } catch (e) {
     console.error("AI fetch failed:", e);
-
-    // GUARANTEED FALLBACK
+    // GUARNTEED FALLBACK
     setIngredients("");
     setStep("manual");
 
   } finally {
     setIsLoading(false);
   }
-};
 
+};
   const analyzeSafety = async () => {
     setIsLoading(true);
     setLoadingMessage("Analyzing Safety...");
