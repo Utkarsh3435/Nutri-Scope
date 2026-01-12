@@ -78,51 +78,94 @@ export default function App() {
   }, [step]);
 
   const handleBarcodeFound = async (code) => {
-  setBarcode(code);
-  setIsLoading(true);
-  setLoadingMessage("Scanning Database...");
+    setBarcode(code);
+    setIsLoading(true);
+    setLoadingMessage("Scanning Database...");
 
-  try {
-    const res = await fetch(
-      `https://world.openfoodfacts.org/api/v0/product/${code}.json`
-    );
-    const data = await res.json();
+    try {
+      // 1. Use V2 API + Timestamp to prevent caching old bad results
+      const res = await fetch(
+        `https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,ingredients_text,ingredients&t=${Date.now()}`
+      );
+      const data = await res.json();
 
-    if (data.status === 1 && data.product) {
-      const product = data.product;
-      const name = product.product_name || "Unknown Product";
-      setProductName(name);
-      setVariant("");
+      if (data.status === 1 || data.product) {
+        const product = data.product || data;
+        const name = product.product_name || "Unknown Product";
+        setProductName(name);
+        setVariant("");
 
-      // ---------- FIX: Robust ingredient extraction ----------
-      const extractedIngredients =
-        product.ingredients_text ||
-        product.ingredients_text_en ||
-        product.ingredients_text_hi ||
-        product.ingredients_text_fr ||
-        product.ingredients_text_with_allergens ||
-        (Array.isArray(product.ingredients)
-          ? product.ingredients.map(i => i.text).join(", ")
-          : "");
+        // 2. SMART SEARCH: Find the longest ingredient list in ANY language
+        const allKeys = Object.keys(product);
+        const ingredientKeys = allKeys.filter(key => 
+          key.startsWith("ingredients_text") && product[key]
+        );
 
-      if (extractedIngredients && extractedIngredients.trim()) {
-        setIngredients(extractedIngredients);
-        setStep("confirm");
+        // Sort by length (longest is usually the best one)
+        ingredientKeys.sort((a, b) => product[b].length - product[a].length);
+
+        let finalIngredients = "";
+        
+        if (ingredientKeys.length > 0) {
+          finalIngredients = product[ingredientKeys[0]];
+        } else if (Array.isArray(product.ingredients)) {
+          finalIngredients = product.ingredients
+            .map(i => i.text || i.text_en || i.id)
+            .filter(Boolean)
+            .join(", ");
+        }
+
+        // 3. Validation: If ingredients are too short, force AI search
+        if (finalIngredients && finalIngredients.length > 5) {
+          setIngredients(finalIngredients);
+          setStep("confirm");
+        } else {
+          // Force Gemini if API gave us nothing
+          await fetchIngredientsOnline(name, "");
+        }
       } else {
-        await fetchIngredientsOnline(name, "");
+        setStep("manual");
       }
-      // -------------------------------------------------------
-
-    } else {
+    } catch (e) {
+      console.error("Food API error:", e);
       setStep("manual");
+    } finally {
+      setIsLoading(false);
     }
-  } catch (e) {
-    console.error("Food API error:", e);
-    setStep("manual");
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
+
+  // --- PASTE THIS IN THE EMPTY SPACE BEFORE analyzeSafety ---
+  const fetchIngredientsOnline = async (name, variantInput) => {
+    setIsLoading(true);
+    setLoadingMessage("AI Searching...");
+
+    const fullName = variantInput ? `${name} ${variantInput}` : name;
+    setProductName(fullName);
+
+    try {
+      // Ask Gemini for ingredients
+      const text = await callGemini(
+        `Return comma-separated ingredients for "${fullName}". If unknown, return "NOT_FOUND".`
+      );
+
+      if (!text || text.includes("NOT_FOUND")) {
+        setIngredients("");
+        setStep("manual");
+        alert("AI could not find this product. Please enter ingredients manually.");
+        return;
+      }
+
+      setIngredients(text);
+      setStep("confirm");
+
+    } catch (e) {
+      console.error("AI fetch failed:", e);
+      setIngredients("");
+      setStep("manual");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const analyzeSafety = async () => {
     setIsLoading(true);
