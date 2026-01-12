@@ -1,18 +1,17 @@
 export default async function handler(req, res) {
   // 1. Basic Setup
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST") return res.status(200).json({ result: "Error: Method not allowed" });
   
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "API Key missing in Vercel Settings" });
+  if (!apiKey) return res.status(200).json({ result: "Error: API Key missing in Vercel Settings" });
 
   const { prompt } = req.body;
 
-  // STRATEGY: Use ONLY the models visible in your "Gemini API Usage" screenshot.
-  // We skip 'gemini-3-flash' because it is throwing 404s.
+  // STRATEGY: Use ONLY the models from your screenshots
   const models = [
-    "gemini-2.5-flash-lite", // Primary: Shows 4/10 usage in your screenshot
-    "gemini-2.5-flash",      // Backup: Shows 0/5 usage
-    "gemini-1.5-flash"       // Safety: Old reliable (often works even if not listed)
+    "gemini-2.5-flash-lite", // Primary
+    "gemini-2.5-flash",      // Backup
+    "gemini-1.5-flash"       // Last Resort
   ];
   
   let lastError = "Unknown Error";
@@ -34,19 +33,26 @@ export default async function handler(req, res) {
       if (response.ok) {
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        return res.status(200).json({ result: text });
+        
+        if (text) {
+          return res.status(200).json({ result: text });
+        } else {
+          // If Google returns 200 but empty text (Safety filter blocked it)
+          console.warn(`[Backend] ${model} returned empty text (Safety Filter?)`);
+          lastError = "AI blocked response (Safety Filter)";
+          continue;
+        }
       }
 
-      // FAILURE - Log it and try the next one
+      // FAILURE
       const errorText = await response.text();
-      console.warn(`[Backend] ${model} failed (${response.status}). Trying next...`);
+      console.warn(`[Backend] ${model} failed (${response.status})`);
       
-      // Keep the detailed error to show you if all fail
       try {
         const errJson = JSON.parse(errorText);
-        lastError = `${model}: ${errJson.error.message}`;
+        lastError = errJson.error.message;
       } catch {
-        lastError = `${model}: ${errorText}`;
+        lastError = errorText;
       }
 
     } catch (e) {
@@ -55,8 +61,11 @@ export default async function handler(req, res) {
     }
   }
 
-  // If ALL 3 fail, return the EXACT error from Google
-  return res.status(500).json({ 
-    error: `Analysis Failed. Google Error: ${lastError}` 
+  // --- THE TRICK ---
+  // Instead of sending 500 (which crashes your App), we send 200 (Success).
+  // But we put the ERROR message inside the result text.
+  // This forces your App to show the error in the "Ingredients" box.
+  return res.status(200).json({ 
+    result: `SYSTEM ERROR: ${lastError}` 
   });
 }
