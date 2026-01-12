@@ -88,21 +88,36 @@ export default function App() {
     );
     const data = await res.json();
 
-    if (data.status === 1) {
-      const name = data.product.product_name || "Unknown Product";
+    if (data.status === 1 && data.product) {
+      const product = data.product;
+      const name = product.product_name || "Unknown Product";
       setProductName(name);
       setVariant("");
 
-      if (data.product.ingredients_text?.trim()) {
-        setIngredients(data.product.ingredients_text);
+      // ---------- FIX: Robust ingredient extraction ----------
+      const extractedIngredients =
+        product.ingredients_text ||
+        product.ingredients_text_en ||
+        product.ingredients_text_hi ||
+        product.ingredients_text_fr ||
+        product.ingredients_text_with_allergens ||
+        (Array.isArray(product.ingredients)
+          ? product.ingredients.map(i => i.text).join(", ")
+          : "");
+
+      if (extractedIngredients && extractedIngredients.trim()) {
+        setIngredients(extractedIngredients);
         setStep("confirm");
       } else {
         await fetchIngredientsOnline(name, "");
       }
+      // -------------------------------------------------------
+
     } else {
       setStep("manual");
     }
   } catch (e) {
+    console.error("Food API error:", e);
     setStep("manual");
   } finally {
     setIsLoading(false);
