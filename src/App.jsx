@@ -99,13 +99,18 @@ export default function App() {
     setProductName(name);
     setVariant("");
 
-    const ingredientsText =
-      p.ingredients_text ||
-      p.ingredients_text_en ||
-      p.ingredients_text_with_allergens ||
-      (Array.isArray(p.ingredients)
-        ? p.ingredients.map(i => i.text).join(", ")
-        : "");
+    let ingredientsText = "";
+    if (typeof p.ingredients_text === "string" && p.ingredients_text.length > 5) {
+      ingredientsText = p.ingredients_text;
+    } else if (typeof p.ingredients_text_en === "string" && p.ingredients_text_en.length > 5) {
+        ingredientsText = p.ingredients_text_en;
+      } else if (Array.isArray(p.ingredients) && p.ingredients.length > 0) {
+        ingredientsText = p.ingredients
+        .map(i => i.text)
+        .filter(Boolean)
+        .join(", ");
+      }
+
 
     if (ingredientsText && ingredientsText.trim()) {
       setIngredients(ingredientsText);
