@@ -78,68 +78,76 @@ export default function App() {
   }, [step]);
 
   const handleBarcodeFound = async (code) => {
-    setBarcode(code);
-    setIsLoading(true);
-    setLoadingMessage("Scanning Database...");
+  setBarcode(code);
+  setIsLoading(true);
+  setLoadingMessage("Scanning Database...");
 
-    try {
-      // FIX 1: Use V2 API and add a timestamp to force a fresh network call (Bypasses Cache)
-      const res = await fetch(
-        `https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,ingredients_text,ingredients&t=${Date.now()}`
-      );
-      
-      const data = await res.json();
+  try {
+    const res = await fetch(
+      `https://world.openfoodfacts.org/api/v0/product/${code}.json`
+    );
+    const data = await res.json();
 
-      // Note: V2 API returns "status" as number 1, or sometimes just returns the product object directly
-      if (data.status === 1 || data.product) {
-        const product = data.product || data;
-        const name = product.product_name || "Unknown Product";
-        setProductName(name);
-        setVariant("");
+    if (data.status === 1 && data.product) {
+      const p = data.product;
+      const name = p.product_name || "Unknown Product";
+      setProductName(name);
+      setVariant("");
 
-        // FIX 2: The "Get Any Ingredient" Logic
-        // We look for ANY field starting with "ingredients_text"
-        const allKeys = Object.keys(product);
-        const ingredientKeys = allKeys.filter(key => 
-          key.startsWith("ingredients_text") && product[key]
-        );
+      let ingredientsText = "";
 
-        // Sort by length (longest is best)
-        ingredientKeys.sort((a, b) => product[b].length - product[a].length);
-
-        let finalIngredients = "";
-        
-        if (ingredientKeys.length > 0) {
-          finalIngredients = product[ingredientKeys[0]];
-        } else if (Array.isArray(product.ingredients)) {
-           // Fallback to array mapping
-           finalIngredients = product.ingredients
-            .map(i => i.text || i.text_en || i.id)
-            .filter(Boolean)
-            .join(", ");
-        }
-
-        console.log("API returned:", finalIngredients);
-
-        // FIX 3: Length check. If ingredients are less than 5 letters, it's junk data.
-        if (finalIngredients && finalIngredients.length > 5) {
-          setIngredients(finalIngredients);
-          setStep("confirm");
-        } else {
-          // Force Gemini if API gave us nothing or junk
-          console.log("Ingredients missing or too short, asking Gemini...");
-          await fetchIngredientsOnline(name, "");
-        }
-      } else {
-        setStep("manual");
+      // HARD FALLBACK CHAIN
+      if (p.ingredients_text) ingredientsText = p.ingredients_text;
+      else if (p.ingredients_text_en) ingredientsText = p.ingredients_text_en;
+      else if (p.ingredients_text_with_allergens) ingredientsText = p.ingredients_text_with_allergens;
+      else if (Array.isArray(p.ingredients) && p.ingredients.length > 0) {
+        ingredientsText = p.ingredients.map(i => i.text).join(", ");
       }
-    } catch (e) {
-      console.error("Food API error:", e);
-      setStep("manual");
-    } finally {
-      setIsLoading(false);
+
+      // FINAL GUARANTEE
+      if (!ingredientsText || !ingredientsText.trim()) {
+        ingredientsText = "__FORCE_AI__";
+      }
+
+      setIngredients(ingredientsText);
+      setStep("confirm");
+      return;
     }
-  };
+
+    setStep("manual");
+  } catch (e) {
+    console.error("Food API failed:", e);
+    setStep("manual");
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+const fetchIngredientsOnline = async (name, variantInput) => {
+  setIsLoading(true);
+  setLoadingMessage("AI Searching...");
+
+  const fullName = variantInput ? `${name} ${variantInput}` : name;
+  setProductName(fullName);
+
+  try {
+    const text = await callGemini(
+      `Return comma-separated ingredients for "${fullName}".`
+    );
+
+    if (!text) throw new Error("No AI response");
+
+    setIngredients(text);
+    setStep("confirm");
+
+  } catch (e) {
+    console.error("AI fetch failed:", e);
+    setIngredients("");
+    setStep("manual");
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const analyzeSafety = async () => {
     setIsLoading(true);
