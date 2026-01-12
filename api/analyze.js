@@ -1,60 +1,60 @@
-// This line is the magic fix. It moves execution to the Edge network.
-export const config = {
-  runtime: 'edge',
-};
+export default async function handler(req, res) {
+  // 1. Basic Setup
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: "API Key missing in Vercel Settings" });
 
-export default async function handler(req) {
-  // Edge functions use the standard Web Request/Response API
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
-  }
+  const { prompt } = req.body;
+  
+  // 2. Target the best model
+  const model = "gemini-2.5-flash-lite";
+  let lastError = "Unknown Error";
 
-  try {
-    const { prompt } = await req.json();
-    const apiKey = process.env.GEMINI_API_KEY;
-
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: "Server Error: API Key missing" }), { status: 500 });
-    }
-
-    // STRATEGY: Try 2.5-flash-lite first, then 3-flash as backup
-    const models = ["gemini-2.5-flash-lite", "gemini-3-flash"];
-
-    for (const model of models) {
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-          }
-        );
-
-        if (response.status === 429) continue; // Busy? Try next.
-
-        if (!response.ok) {
-            console.error(`${model} failed: ${response.status}`);
-            continue;
+  // 3. RETRY LOGIC (Try 3 times with 1-second delays)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      console.log(`[Attempt ${attempt}] Calling ${model}...`);
+      
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
         }
+      );
 
+      // If Success
+      if (response.ok) {
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-        if (text) {
-          return new Response(JSON.stringify({ result: text }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-      } catch (e) {
-        console.error(e);
+        return res.status(200).json({ result: text });
       }
+
+      // If Failed, capture the REAL reason
+      const errorText = await response.text();
+      console.error(`Attempt ${attempt} Failed:`, errorText);
+      
+      // Save the error message to show you
+      try {
+        const errorJson = JSON.parse(errorText);
+        lastError = errorJson.error.message;
+      } catch {
+        lastError = errorText; 
+      }
+
+      // Wait 1 second before retrying (unless it's the last attempt)
+      if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
+
+    } catch (e) {
+      console.error(`Attempt ${attempt} Network Error:`, e);
+      lastError = e.message;
     }
-
-    return new Response(JSON.stringify({ error: "System busy. Please try again." }), { status: 429 });
-
-  } catch (error) {
-    return new Response(JSON.stringify({ error: "Invalid Request" }), { status: 400 });
   }
+
+  // 4. If all 3 attempts fail, send the REAL error to the frontend
+  return res.status(500).json({ 
+    error: `Google Error: ${lastError}` 
+  });
 }
